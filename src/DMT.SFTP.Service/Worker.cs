@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Renci.SshNet;
-using SshNet;
+using Renci.SshNet.Sftp;
 
 namespace DMT.SFTP.Service
 {
@@ -18,6 +19,7 @@ namespace DMT.SFTP.Service
         private readonly string _userName;
         private readonly string _password;
         private readonly string _host;
+        private readonly string _tiContactOutboundDirectory;
 
         public Worker(ILogger<Worker> logger, IOptions<AppSettings> appSettings)
         {
@@ -26,17 +28,16 @@ namespace DMT.SFTP.Service
             _userName = _appSettings.Username;
             _password = _appSettings.Password;
             _host = _appSettings.Host;
+            _tiContactOutboundDirectory = _appSettings.TiContactOutboundDirectory;
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Application is starting");
             return base.StartAsync(cancellationToken);
         }
 
         public override Task StopAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Application is shutting down");
             return base.StopAsync(cancellationToken);
         }
 
@@ -44,37 +45,105 @@ namespace DMT.SFTP.Service
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                using (var sftpClient = new SftpClient(_host, 22, _userName, _password))
+                {
+                    sftpClient.Connect();
 
+                    var inboundContactFiles = GetNewInboundFileNamesFromTi(sftpClient);
+                    var outboundContactFiles = GetNewOutboundFileNamesFromGk(_appSettings.GkContactOutboundDirectory);
+
+                    try
+                    {
+                        
+                        if (inboundContactFiles.Count > 0)
+                        {
+                            _logger.LogInformation($"{inboundContactFiles.Count} files found in the true interation outbound site");
+
+                            foreach (var sourceFile in inboundContactFiles)
+                            {
+                                MoveFileFromTiSftpSiteToGk(sftpClient, sourceFile);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogInformation("No new contact files found in the true interaction outbound site");
+                        }
+
+                        if (outboundContactFiles.Count > 0)
+                        {
+                            _logger.LogInformation($"{outboundContactFiles.Count} files found in the golden key outbound site");
+                            foreach (var sourceFile in outboundContactFiles)
+                            {
+                                _logger.LogInformation($"Moving file {sourceFile}");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogInformation("No new contact files found in the golden key outbound site");
+                        }
+                    }
+                    catch(Exception ex)
+                    {
+                        _logger.LogError($"Unhandled exception: {ex.Message}");
+                    }
+                    finally
+                    {
+                        sftpClient.Disconnect();
+                    }
+                }
                 
-
-                await Task.Delay(TimeSpan.FromMinutes(_appSettings.PollingIntervalMinutes), stoppingToken);
+                await Task.Delay(2000, stoppingToken);
             }
         }
 
-        private List<string> GetNewInboundFileNamesFromFTP()
+        private List<SftpFile> GetNewInboundFileNamesFromTi(SftpClient sftpClient)
         {
-            var inboundFiles = new List<string>();
-
-            using (var sftpClient = new Renci.SshNet.SftpClient(_host, _userName, _password))
-            {
-                sftpClient.Connect();
-            }
-
-                return inboundFiles;
+            var inboundFiles = new List<SftpFile>();
+            
+            ListSftpDirectory(sftpClient, _tiContactOutboundDirectory, ref inboundFiles);
+            
+            return inboundFiles;
         }
 
-        private void ListSftpDirectory(SftpClient sftpClient, string directory, ref List<string> files)
+        private List<string> GetNewOutboundFileNamesFromGk(string sourceDirectory)
+        {
+            var outboundFiles = new List<string>();
+            var directoryInfo = new DirectoryInfo(sourceDirectory);
+
+            if(directoryInfo.Exists)
+            {
+                var files = directoryInfo.GetFiles();
+                foreach(var file in files)
+                {
+                    outboundFiles.Add(file.FullName);
+                }
+            }
+            else
+            {
+                _logger.LogError($"Cannot locate directory {sourceDirectory}");
+            }
+
+            return outboundFiles;
+        }
+
+        private void ListSftpDirectory(SftpClient sftpClient, string directory, ref List<SftpFile> files)
         {
             foreach (var sftpEntry in sftpClient.ListDirectory(directory))
             {
                 if(sftpEntry.IsRegularFile)
                 {
+                    files.Add(sftpEntry);
+                }
+            }
+        }
 
-                }
-                else
-                {
-                    _logger.LogWarning($"Not a regular file: {sftpEntry.FullName}");
-                }
+        private void MoveFileFromTiSftpSiteToGk(SftpClient sftpClient, SftpFile sourceFile)
+        {
+            var localFilePath = _appSettings.GkContactInboundDirectory + sourceFile.Name;
+
+            using (Stream localFile = File.Create(localFilePath))
+            {
+                sftpClient.DownloadFile(sourceFile.FullName, localFile);
             }
         }
     }
