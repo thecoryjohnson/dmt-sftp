@@ -32,6 +32,7 @@ namespace DMT.SFTP.Service
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .UseWindowsService()
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.Configure<AppSettings>(hostContext.Configuration.GetSection("AppSettings"));

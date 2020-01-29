@@ -61,11 +61,8 @@ namespace DMT.SFTP.Service
 
                             foreach (var sourceFile in inboundContactFiles)
                             {
-                                _logger.LogInformation($"Moving WordPress extract file {sourceFile.Name}");
-
                                 MoveFileFromTiSftpSiteToGk(sftpClient, sourceFile);
-
-                                _logger.LogInformation($"{sourceFile.Name} moved from remote site to Gk");
+                                DeleteRemoteSftpFile(sftpClient, sourceFile);
                             }
                         }
                         else
@@ -77,13 +74,11 @@ namespace DMT.SFTP.Service
                         if (outboundContactFiles.Count > 0)
                         {
                             _logger.LogInformation($"{outboundContactFiles.Count} files found in the golden key outbound site");
+
                             foreach (var sourceFile in outboundContactFiles)
                             {
-                                _logger.LogInformation($"Moving Netforum extract file {sourceFile}");
-
                                 MoveFileFromGkToTiSftpSite(sftpClient, sourceFile);
-
-                                _logger.LogInformation($"{sourceFile} moved from Gk to remote site");
+                                DeleteLocalFile(sourceFile);
                             }
                         }
                         else
@@ -173,7 +168,11 @@ namespace DMT.SFTP.Service
 
             using (Stream localFile = File.Create(localFilePath))
             {
+                _logger.LogInformation($"Moving {sourceFile.Name} to {localFilePath}");
+
                 sftpClient.DownloadFile(sourceFile.FullName, localFile);
+
+                _logger.LogInformation($"Move complete: {localFilePath}");
             }
         }
 
@@ -189,8 +188,41 @@ namespace DMT.SFTP.Service
 
             using (Stream localFile = File.OpenRead(localFilePath))
             {
+                _logger.LogInformation($"Moving Netforum extract file {sourceFile}");
+
                 sftpClient.UploadFile(localFile, remotePath);
+
+                _logger.LogInformation($"{sourceFile} moved from Gk to remote site: {remotePath}");
             }
+        }
+
+        /// <summary>
+        /// Removes the remote SFTP file
+        /// </summary>
+        /// <param name="sftpClient"></param>
+        /// <param name="sftpFile"></param>
+        private void DeleteRemoteSftpFile(SftpClient sftpClient, SftpFile sftpFile)
+        {
+            _logger.LogInformation($"Deleting file {sftpFile.Name} from remote site");
+            
+            sftpClient.DeleteFile(sftpFile.FullName);
+
+            _logger.LogInformation($"{sftpFile.Name} deleted");
+        }
+
+        /// <summary>
+        /// Deletes a file on the local host file system
+        /// </summary>
+        /// <param name="filePath"></param>
+        private void DeleteLocalFile(string filePath)
+        {
+            var localFilePath = _appSettings.GkContactOutboundDirectory + filePath;
+
+            _logger.LogInformation($"Deleting {localFilePath}");
+
+            File.Delete(localFilePath);
+
+            _logger.LogInformation($"{localFilePath} deleted");
         }
     }
 }
