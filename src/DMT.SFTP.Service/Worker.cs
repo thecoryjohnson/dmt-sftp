@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -61,8 +60,15 @@ namespace DMT.SFTP.Service
 
                             foreach (var sourceFile in inboundContactFiles)
                             {
-                                MoveFileFromTiSftpSiteToGk(sftpClient, sourceFile);
-                                DeleteRemoteSftpFile(sftpClient, sourceFile);
+                                try
+                                {
+                                    MoveFileFromTiSftpSiteToGk(sftpClient, sourceFile);
+                                    DeleteRemoteSftpFile(sftpClient, sourceFile);
+                                }
+                                catch(Exception ex)
+                                {
+                                    _logger.LogError(ex, $"Error while moving {sourceFile.Name}");
+                                }
                             }
                         }
                         else
@@ -77,8 +83,15 @@ namespace DMT.SFTP.Service
 
                             foreach (var sourceFile in outboundContactFiles)
                             {
-                                MoveFileFromGkToTiSftpSite(sftpClient, sourceFile);
-                                DeleteLocalFile(sourceFile);
+                                try
+                                {
+                                    MoveFileFromGkToTiSftpSite(sftpClient, sourceFile);
+                                    DeleteLocalFile(sourceFile);
+                                }
+                                catch(Exception ex)
+                                {
+                                    _logger.LogError(ex, $"Error while moving {sourceFile}");
+                                }
                             }
                         }
                         else
@@ -88,14 +101,13 @@ namespace DMT.SFTP.Service
                     }
                     catch(Exception ex)
                     {
-                        _logger.LogError($"Unhandled exception: {ex.Message}");
+                        _logger.LogError(ex, "Unhandled exception");
                     }
                     finally
                     {
                         sftpClient.Disconnect();
                     }
                 }
-                
                 await Task.Delay(TimeSpan.FromMinutes(_appSettings.PollingIntervalMinutes), stoppingToken);
             }
         }
